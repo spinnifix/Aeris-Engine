@@ -1,0 +1,24 @@
+# --- Security (NEVER UPLOAD THESE) ---
+.env
+*.pem
+*.ppk
+*.key
+secrets.json
+
+# --- Python Junk ---
+__pycache__/
+*.pyc
+venv/
+.pytest_cache/
+
+# --- Local Data & Logs ---
+*.log
+*.csv
+*.dump
+*.sql
+timescaledb_data/
+aeris_files/
+
+# --- IDE Settings ---
+.vscode/
+.idea/

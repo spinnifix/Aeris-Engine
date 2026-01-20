@@ -1,0 +1,28 @@
+version: '3.8'
+
+services:
+  timescaledb:
+    image: timescale/timescaledb:latest-pg16
+    container_name: timescaledb
+    restart: always
+    
+    # 🔗 This connects to your .env file automatically!
+    env_file:
+      - .env
+      
+    environment:
+      # We map the variables from your .env file to the container's internal variables
+      - POSTGRES_USER=${DB_USER}
+      - POSTGRES_PASSWORD=${DB_PASS}
+      - POSTGRES_DB=${DB_NAME}
+      
+    ports:
+      - "5432:5432"
+      
+    # 💾 The "Save Game" feature. This ensures data survives restarts.
+    volumes:
+      - timescaledb_prod_data:/var/lib/postgresql/data
+
+# Define the volume storage
+volumes:
+  timescaledb_prod_data:

@@ -1,0 +1,30 @@
+# docker-compose.yml
+
+version: '3.8'
+
+services:
+  # This defines our database service and names it 'db'
+  db:
+    # We use an official image that has PostgreSQL and TimescaleDB pre-installed
+    image: timescale/timescaledb:latest-pg16
+    container_name: aeris_timescaledb
+    
+    # These are the login credentials for our database.
+    # Our Python script will use these to connect.
+    environment:
+      - POSTGRES_USER=aeris_user
+      - POSTGRES_PASSWORD=aeris_pass # YOU CAN CHANGE THIS PASSWORD IF YOU WISH
+      - POSTGRES_DB=aeris_db
+      
+    # This connects the database port inside the container (5432)
+    # to the same port on your computer, so our scripts can find it.
+    ports:
+      - "5432:5432"
+      
+    # This ensures our data is saved even if we restart the container.
+    volumes:
+      - ./timescaledb_data:/var/lib/postgresql/data
+
+# This defines the persistent data volume
+volumes:
+  timescaledb_data:
