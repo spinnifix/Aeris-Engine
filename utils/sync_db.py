@@ -7,23 +7,29 @@ import stat
 from pathlib import Path
 from dotenv import load_dotenv
 
+# Load environment variables
+load_dotenv()
+
 # --- ⚙️ CONFIGURATION ---
-# Load from environment variable, fallback to empty if missing
-SERVER_IP = os.getenv("AWS_SERVER_IP", "YOUR_AWS_IP_HERE")          
-REMOTE_USER = "ubuntu"
-REMOTE_CONTAINER = "timescaledb"      
-REMOTE_DB_USER = "postgres"           
+SERVER_IP = os.getenv("AWS_SERVER_IP", "13.202.198.74")
+REMOTE_USER = os.getenv("AWS_USER", "ubuntu")
+REMOTE_CONTAINER = "timescaledb"
+REMOTE_DB_USER = "postgres"
 
-LOCAL_CONTAINER = "aeris_timescaledb" 
-LOCAL_DB_USER = "aeris_user"          
+LOCAL_CONTAINER = "aeris_timescaledb"
+LOCAL_DB_USER = "aeris_user"
 
-KEY_FILE = "aeris-key.pem"
+# Get password from .env (Crucial for the fix)
+DB_PASS = os.getenv("DB_PASS")
+
+KEY_FILE = os.getenv("SSH_KEY_PATH", "aeris-key.pem")
 TEMP_KEY = "temp_secure_key.pem"
 TABLES = ["traffic_data", "aqi_data", "weather_data"]
 
 def run_command(command, shell=True):
     try:
-        subprocess.check_call(command, shell=shell)
+        # stdin=subprocess.DEVNULL prevents SSH from hanging waiting for input
+        subprocess.check_call(command, shell=shell, stdin=subprocess.DEVNULL)
     except subprocess.CalledProcessError:
         print("❌ Error encountered. Stopping.")
         force_delete_temp_key()
@@ -56,6 +62,11 @@ def fix_permissions_windows(file_path):
 
 def sync():
     print("🚀 Starting Database Sync (Stream-to-Host Mode)...")
+    
+    if not DB_PASS:
+        print("❌ Error: DB_PASS not found in .env file.")
+        sys.exit(1)
+
     force_delete_temp_key()
 
     print("🔑 Preparing secure key...")
@@ -71,22 +82,23 @@ def sync():
         f"docker exec {LOCAL_CONTAINER} psql -U {LOCAL_DB_USER} -d aeris_db "
         f"-c \"TRUNCATE TABLE traffic_data, aqi_data, weather_data CASCADE;\""
     )
-    subprocess.run(truncate_cmd, shell=True)
+    subprocess.run(truncate_cmd, shell=True, stdin=subprocess.DEVNULL)
 
     for table in TABLES:
         local_csv = f"{table}.csv"
-        remote_csv_path = f"/home/{REMOTE_USER}/{table}.csv" # Save directly to AWS User home
+        remote_csv_path = f"/home/{REMOTE_USER}/{table}.csv"
         
         print(f"\n--- 🔄 Processing Table: {table} ---")
 
-        # 1. EXPORT TO AWS HOST FILE (Skipping Container Filesystem)
+        # 1. EXPORT TO AWS HOST FILE
         print(f"   1️⃣  Streaming from DB to AWS Host file...")
         
-        # We redirect STDOUT (>) to a file on the AWS Host machine, NOT inside the container.
+        # FIX: We pass the password directly via -e (Clean & Simple)
+        # We assume DB_PASS contains standard characters. If it has single quotes, this might need tweaking.
         remote_cmd = (
-            f"docker exec {REMOTE_CONTAINER} bash -c \"export PGPASSWORD=\\$POSTGRES_PASSWORD; "
-            f"psql -h localhost -U {REMOTE_DB_USER} -d aeris_db "
-            f"-c '\\COPY (SELECT * FROM {table}) TO STDOUT CSV'\" > {remote_csv_path}"
+            f"echo 'COPY {table} TO STDOUT CSV' | "
+            f"docker exec -i -e PGPASSWORD='{DB_PASS}' {REMOTE_CONTAINER} "
+            f"psql -h localhost -U {REMOTE_DB_USER} -d aeris_db > {remote_csv_path}"
         )
         
         run_command(f'ssh {ssh_opts} {REMOTE_USER}@{SERVER_IP} "{remote_cmd}"')
@@ -104,7 +116,7 @@ def sync():
             f"-c \"\\COPY {table} FROM '/tmp/{local_csv}' CSV\""
         )
         try:
-            subprocess.check_call(import_cmd, shell=True)
+            subprocess.check_call(import_cmd, shell=True, stdin=subprocess.DEVNULL)
             print(f"   ✅ Success: {table} synced.")
         except subprocess.CalledProcessError:
             print(f"   ❌ Failed to import {table}.")
@@ -113,7 +125,7 @@ def sync():
         if os.path.exists(local_csv):
             os.remove(local_csv)
             
-        # Optional: Remove the file from AWS to save space
+        # Remote Cleanup
         run_command(f'ssh {ssh_opts} {REMOTE_USER}@{SERVER_IP} "rm {remote_csv_path}"')
 
     print("\n🧹 Cleaning up keys...")
